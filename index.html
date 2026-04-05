@@ -70,8 +70,9 @@
   .glass-white { background:var(--bg-card); backdrop-filter:blur(20px); border:1px solid var(--border); border-radius:20px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.08); }
 
   /* ── LEFT ── */
-  .left-col { display:flex; flex-direction:column; gap:10px; overflow:hidden; }
-  .port-card { padding:15px 18px; display:flex; flex-direction:column; }
+  .left-col { display:flex; flex-direction:column; gap:10px; overflow:hidden; min-height:0; }
+  .port-card { padding:15px 18px; display:flex; flex-direction:column; flex-shrink:0; }
+  .wl-item   { flex-shrink:0; }
   .port-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
   .port-title  { font-size:13px; font-weight:700; color:var(--text); }
   .port-period { font-size:10px; font-weight:600; color:var(--text-3); background:#f1f5f9; padding:3px 9px; border-radius:20px; cursor:pointer; transition:background .2s; }
@@ -100,7 +101,8 @@
   /* 관심종목 */
   .wl-hdr  { display:flex; justify-content:space-between; align-items:center; padding:11px 16px 9px; border-bottom:1px solid rgba(255,255,255,.2); }
   .wl-title-txt { font-size:13px; font-weight:700; color:#fff; }
-  .wl-scroll { overflow-y:auto; }
+  .wl-card   { display:flex; flex-direction:column; min-height:0; }
+  .wl-scroll { overflow-y:auto; flex:1; min-height:0; }
   .wl-item { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; border-bottom:1px solid rgba(255,255,255,.07); cursor:pointer; transition:background .15s; }
   .wl-item:hover { background:rgba(255,255,255,.08); }
   .wl-item.sel   { background:rgba(255,255,255,.14); }
@@ -148,13 +150,14 @@
   .vol-h    { height:60px; }
 
   /* ── RIGHT ── */
-  .right-col { display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+  .right-col { display:flex; flex-direction:column; gap:10px; overflow-y:auto; min-height:0; }
+  .right-col > * { flex-shrink:0; }
   .sig-card { padding:13px 16px; }
   .sig-hdr  { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
   .sig-title { font-size:13px; font-weight:700; color:var(--text); }
   .sig-live  { font-size:9px; font-weight:700; padding:3px 9px; border-radius:20px; background:var(--green-lt); color:#059669; border:1px solid rgba(16,185,129,.25); display:flex; align-items:center; gap:4px; }
   .live-dot  { width:5px; height:5px; border-radius:50%; background:#10b981; animation:pulse 1.5s infinite; }
-  .sig-box   { text-align:center; padding:13px 10px; border-radius:14px; margin-bottom:9px; }
+  .sig-box   { text-align:center; padding:13px 10px; border-radius:14px; margin-bottom:9px; min-height:82px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
   .sig-box.buy  { background:linear-gradient(135deg,#dcfce7,#bbf7d0); border:1px solid rgba(16,185,129,.2); }
   .sig-box.sell { background:linear-gradient(135deg,#fee2e2,#fecaca); border:1px solid rgba(244,63,94,.2); }
   .sig-box.hold { background:linear-gradient(135deg,#fef9c3,#fef08a); border:1px solid rgba(245,158,11,.2); }
@@ -1572,34 +1575,58 @@ function drawPortChartSample() {
 /* ════════════════════════════════════════════════
    4. 관심종목
 ════════════════════════════════════════════════ */
+function renderWatchlistHtml(items) {
+  // items: [{code, name, price, change_pct}]
+  return items.map(item => {
+    const isUp = item.change_pct >= 0;
+    const sel  = item.code === currentTicker ? " sel" : "";
+    const sd   = STOCKS_DATA[item.code];
+    const sig  = sd ? sd.signal : null;
+    const badge = sd ? sd.badge : null;
+    const sigCls = sig === "buy" ? "wis-buy" : sig === "sell" ? "wis-sell" : sig === "watch" ? "wis-watch" : "wis-hold";
+    const badgeHtml = badge ? `<div class="wi-sig ${sigCls}">${badge}</div>` : "";
+    const priceStr = item.price > 0 ? `₩${fmt(item.price)}` : "--";
+    const pctStr   = item.price > 0 ? `${item.change_pct >= 0 ? "+" : ""}${item.change_pct}%` : "-.-%";
+    return `<div class="wl-item${sel}" onclick="switchTicker('${item.code}','${item.name}')">
+      <div><div class="wi-tkr">${item.name}</div><div class="wi-code">${item.code}</div>${badgeHtml}</div>
+      <div style="text-align:right">
+        <div class="wi-price">${priceStr}</div>
+        <div class="wi-pct ${isUp?"up-pill":"dn-pill"}">${pctStr}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 async function loadWatchlist() {
+  // ① 즉시 STOCKS_DATA로 35종목 표시 (가격은 나중에 업데이트)
+  const staticItems = Object.entries(STOCKS_DATA).map(([code, sd]) => ({
+    code, name: sd.name, price: 0, change_pct: 0
+  }));
+  $("watchlistEl").innerHTML = renderWatchlistHtml(staticItems);
+
+  // ② API로 실시간 가격 업데이트 시도
   try {
-    const res  = await fetch(`${API}/api/watchlist`);
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 30000); // 30초 타임아웃
+    const res  = await fetch(`${API}/api/watchlist`, { signal: ctrl.signal });
+    clearTimeout(tid);
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
 
-    const html = data.watchlist.map(item => {
-      const isUp = item.change_pct >= 0;
-      const sel  = item.code === currentTicker ? " sel" : "";
-      const sd   = STOCKS_DATA[item.code];
-      const sig  = sd ? sd.signal : null;
-      const badge = sd ? sd.badge : null;
-      const sigCls = sig === "buy" ? "wis-buy" : sig === "sell" ? "wis-sell" : sig === "watch" ? "wis-watch" : "wis-hold";
-      const badgeHtml = badge ? `<div class="wi-sig ${sigCls}">${badge}</div>` : "";
-      return `<div class="wl-item${sel}" onclick="switchTicker('${item.code}','${item.name}')">
-        <div><div class="wi-tkr">${item.name}</div><div class="wi-code">${item.code}</div>${badgeHtml}</div>
-        <div style="text-align:right">
-          <div class="wi-price">₩${fmt(item.price)}</div>
-          <div class="wi-pct ${isUp?"up-pill":"dn-pill"}">${item.change_pct >= 0 ? "+" : ""}${item.change_pct}%</div>
-        </div>
-      </div>`;
-    }).join("");
+    // API 결과가 너무 적으면 (8개 미만) STOCKS_DATA 순서로 보강
+    const apiMap = {};
+    data.watchlist.forEach(w => { apiMap[w.code] = w; });
 
-    $("watchlistEl").innerHTML = html;
+    const merged = staticItems.map(s => apiMap[s.code] || s);
+    $("watchlistEl").innerHTML = renderWatchlistHtml(merged);
+
     const now = new Date();
     $("wlUpdated").textContent = `${now.getHours()}:${now.getMinutes().toString().padStart(2,"0")} 갱신`;
   } catch(e) {
-    showErr(`관심종목 로드 실패: ${e.message}`);
+    // API 실패해도 정적 35종목은 이미 표시됨 — 에러 노출 안 함
+    console.warn("관심종목 가격 업데이트 실패:", e.message);
+    const now = new Date();
+    $("wlUpdated").textContent = `캐시 데이터`;
   }
 }
 
@@ -1773,40 +1800,40 @@ function renderStockDetail(ticker) {
 /* ════════════════════════════════════════════════
    8-2. 종목 뉴스 하단 바 로드 (RSS 필터)
 ════════════════════════════════════════════════ */
+function buildStaticNewsHtml(ticker, name) {
+  const sd = STOCKS_DATA[ticker];
+  if (!sd || !sd.news.length) return null;
+  const items = sd.news.map(n => {
+    const tagCls = n.imp === "pos" ? "tag-pos" : n.imp === "neg" ? "tag-neg" : "tag-neu";
+    const tagTxt = n.imp === "pos" ? "호재" : n.imp === "neg" ? "악재" : "중립";
+    return `<div class="news-item">
+      <span class="news-tag ${tagCls}">${tagTxt}</span>
+      <span class="news-source">[${name}]</span>
+      <span class="news-headline">${n.t}</span>
+      <span class="news-time">${n.d}</span>
+    </div>`;
+  }).join("");
+  return items + items;
+}
+
 async function loadStockNews(ticker, name) {
+  // ① 즉시 정적 데이터 표시 (네트워크 없음)
+  const staticHtml = buildStaticNewsHtml(ticker, name);
+  if (staticHtml) {
+    $("newsTrack").innerHTML = staticHtml;
+  }
+
+  // ② 백그라운드에서 RSS 시도 — 해당 종목 이름이 2건 이상 포함될 때만 교체
   try {
-    // 로딩 표시
-    $("newsTrack").innerHTML = `
-      <div class="news-item">
-        <span class="news-tag tag-neu">로딩</span>
-        <span class="news-headline">${name} 관련 뉴스를 불러오는 중...</span>
-      </div>`;
-
-    const res  = await fetch(`${API}/api/news?count=8&name=${encodeURIComponent(name)}`);
+    const res  = await fetch(`${API}/api/news?count=12&name=${encodeURIComponent(name)}`);
     const data = await res.json();
+    if (!data.ok || !data.news.length) return;
 
-    if (!data.ok || !data.news.length) {
-      // RSS에서 못 찾으면 STOCKS_DATA 정적 뉴스 사용
-      const sd = STOCKS_DATA[ticker];
-      if (sd && sd.news.length) {
-        const items = sd.news.map(n => {
-          const tagCls = n.imp === "pos" ? "tag-pos" : n.imp === "neg" ? "tag-neg" : "tag-neu";
-          const tagTxt = n.imp === "pos" ? "호재" : n.imp === "neg" ? "악재" : "중립";
-          return `<div class="news-item">
-            <span class="news-tag ${tagCls}">${tagTxt}</span>
-            <span class="news-source">[${name}]</span>
-            <span class="news-headline">${n.t}</span>
-            <span class="news-time">${n.d}</span>
-          </div>`;
-        }).join("");
-        $("newsTrack").innerHTML = items + items;
-      } else {
-        $("newsTrack").innerHTML = `<div class="news-item"><span class="news-tag tag-neu">안내</span><span class="news-headline">${name} 관련 뉴스를 찾을 수 없습니다</span></div>`;
-      }
-      return;
-    }
+    // 제목에 종목 이름이 포함된 기사만 필터
+    const relevant = data.news.filter(n => n.title.includes(name));
+    if (relevant.length < 2) return; // 관련 뉴스 부족 → 정적 데이터 유지
 
-    const items = data.news.map(n => `
+    const items = relevant.map(n => `
       <div class="news-item" onclick="window.open('${n.link}','_blank')">
         <span class="news-tag tag-${n.tag}">${n.tag==="pos"?"호재":n.tag==="neg"?"악재":"중립"}</span>
         <span class="news-source">${n.source}</span>
@@ -1815,16 +1842,8 @@ async function loadStockNews(ticker, name) {
       </div>`).join("");
     $("newsTrack").innerHTML = items + items;
   } catch(e) {
-    console.warn("종목 뉴스 로드 실패:", e.message);
-    // 실패 시 정적 데이터로 폴백
-    const sd = STOCKS_DATA[ticker];
-    if (sd && sd.news.length) {
-      const items = sd.news.map(n => {
-        const tagCls = n.imp === "pos" ? "tag-pos" : n.imp === "neg" ? "tag-neg" : "tag-neu";
-        return `<div class="news-item"><span class="news-tag ${tagCls}">${n.imp==="pos"?"호재":n.imp==="neg"?"악재":"중립"}</span><span class="news-headline">${n.t}</span><span class="news-time">${n.d}</span></div>`;
-      }).join("");
-      $("newsTrack").innerHTML = items + items;
-    }
+    // RSS 실패 — 이미 표시된 정적 데이터 그대로 유지
+    console.warn("RSS 뉴스 로드 실패:", e.message);
   }
 }
 
