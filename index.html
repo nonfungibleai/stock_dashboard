@@ -3,37 +3,101 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>주식 대시보드 (라이브)</title>
+<title>주식 대시보드 (Vercel Live)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
+  /* [기존 CSS 스타일과 동일하므로 생략 - 주신 코드의 스타일을 그대로 유지하세요] */
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;800&display=swap');
+  /* ... (스타일 생략) ... */
+</style>
+</head>
+<body>
+<div class="app">
+  </div>
 
-  :root {
-    --accent:#7c3aed; --accent2:#a855f7;
-    --green:#10b981; --green-lt:#d1fae5;
-    --red:#f43f5e;   --red-lt:#ffe4e6;
-    --yellow:#f59e0b; --blue:#3b82f6;
-    --text:#1e1b4b;  --text-2:#475569; --text-3:#94a3b8;
-    --bg-card:rgba(255,255,255,0.92);
-    --border:rgba(255,255,255,0.9);
-  }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body {
-    background:linear-gradient(135deg,#667eea 0%,#764ba2 30%,#f093fb 65%,#f5576c 100%);
-    min-height:100vh; font-family:'Inter','Noto Sans KR',sans-serif; overflow:hidden;
-  }
-  .app { display:grid; grid-template-rows:58px 1fr 72px; height:100vh; }
+<script>
+/* ════════════════════════════════════════════════
+   [수정됨] 설정 및 데이터 통신부
+════════════════════════════════════════════════ */
+const API = ""; // Vercel 내부 API 사용을 위해 비워둠
+let currentTicker  = "005930";
+let currentName    = "삼성전자";
+let currentPeriod  = "1W";
+let priceChartInst = null;
+let volChartInst   = null;
 
-  /* ── NAV ── */
-  .topnav {
-    display:flex; align-items:center; justify-content:space-between;
-    padding:0 22px;
-    background:rgba(255,255,255,0.13); backdrop-filter:blur(24px);
-    border-bottom:1px solid rgba(255,255,255,0.22); z-index:20;
+const $ = id => document.getElementById(id);
+const fmt = n => typeof n === "number" ? n.toLocaleString("ko-KR") : n;
+
+// 1. [수정] 현재가 로드 함수
+async function loadPrice(ticker) {
+  try {
+    const res  = await fetch(`/api/stock?type=price&ticker=${ticker}`);
+    const data = await res.json();
+    if (!data.ok || !data.output) throw new Error(data.error || "데이터 없음");
+
+    const out = data.output;
+    const sign = parseInt(out.prdy_vrss_sign);
+    const isUp = sign <= 2;
+
+    $("heroPrice").textContent = `₩${fmt(parseInt(out.stck_prpr))}`;
+    $("heroChangeAbs").textContent = `${isUp ? "▲" : "▼"} ${fmt(Math.abs(out.prdy_vrss))}`;
+    $("heroChangePct").textContent = `${out.prdy_ctrt > 0 ? "+" : ""}${out.prdy_ctrt}%`;
+    $("heroChangePct").className = `chip ${isUp ? "chip-up" : "chip-dn"}`;
+
+    // 거래량 업데이트
+    const vol = parseInt(out.acml_vol);
+    $("volVal").textContent = `${(vol/10000).toFixed(0)}만주`;
+    $("volBar").style.width = `${Math.min(vol / 1000000 * 100, 100)}%`;
+
+    return data;
+  } catch(e) {
+    console.error(e);
+    return null;
   }
-  .nav-brand { font-size:16px; font-weight:800; color:#fff; }
-  .nav-brand span { opacity:.55; font-weight:400; }
-  .nav-pills { display:flex; gap:4px; background:rgba(255,255,255,0.12); padding:4px; border-radius:14px; }
+}
+
+// 2. [수정] 차트 로드 함수 (데이터 매핑 로직 포함)
+async function loadChart(ticker, period) {
+  try {
+    const res  = await fetch(`/api/stock?type=chart&ticker=${ticker}`);
+    const data = await res.json();
+    if (!data.ok || !data.output2) throw new Error(data.error);
+
+    // 한국투자증권 데이터를 Chart.js 형식으로 변환
+    const rawData = data.output2.slice(0, 30).reverse(); // 최근 30일 데이터
+    const labels = rawData.map(d => d.stck_bsop_date.slice(4,6) + "/" + d.stck_bsop_date.slice(6));
+    const closes = rawData.map(d => parseInt(d.stck_clpr));
+    const volumes = rawData.map(d => parseInt(d.acml_vol));
+
+    // [이후 Chart.js 그리기 로직은 기존과 동일하게 유지]
+    renderPriceChart(labels, closes);
+    renderVolChart(labels, volumes, closes);
+
+  } catch(e) {
+    console.error("차트 에러:", e);
+  }
+}
+
+// [기존의 Chart.js 렌더링 함수들(renderPriceChart 등)을 아래에 배치하세요]
+// [기존의 switchTicker, refreshAll 함수 등 UI 제어 로직도 그대로 유지하세요]
+
+async function refreshAll() {
+  setConn("loading", "데이터 갱신 중...");
+  await Promise.all([
+    loadPrice(currentTicker),
+    loadChart(currentTicker, currentPeriod)
+  ]);
+  setConn("live", "연결됨");
+}
+
+(async () => {
+  await refreshAll();
+  setInterval(refreshAll, 60000); // 1분마다 갱신
+})();
+</script>
+</body>
+</html>
   .nav-pill { padding:6px 18px; font-size:12px; font-weight:600; color:rgba(255,255,255,.7); border-radius:10px; cursor:pointer; transition:all .2s; }
   .nav-pill.active { background:#fff; color:var(--accent); }
 
